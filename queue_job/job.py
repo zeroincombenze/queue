@@ -1,38 +1,40 @@
 # Copyright 2013-2020 Camptocamp
 # License LGPL-3.0 or later (http://www.gnu.org/licenses/lgpl.html)
 
-import hashlib
 import inspect
+import functools
+import hashlib
 import logging
+import uuid
 import os
 import sys
-import uuid
 import weakref
+
 from datetime import datetime, timedelta
 from functools import total_ordering
-from random import randint
 
 import odoo
 
-from .exception import FailedJobError, NoSuchJobError, RetryableJobError
+from .exception import (NoSuchJobError,
+                        FailedJobError,
+                        RetryableJobError)
 
-WAIT_DEPENDENCIES = "wait_dependencies"
-PENDING = "pending"
-ENQUEUED = "enqueued"
-CANCELLED = "cancelled"
-DONE = "done"
-STARTED = "started"
-FAILED = "failed"
 
-STATES = [
-    (WAIT_DEPENDENCIES, "Wait Dependencies"),
-    (PENDING, "Pending"),
-    (ENQUEUED, "Enqueued"),
-    (STARTED, "Started"),
-    (DONE, "Done"),
-    (CANCELLED, "Cancelled"),
-    (FAILED, "Failed"),
-]
+WAIT_DEPENDENCIES = 'wait_dependencies'
+PENDING = 'pending'
+ENQUEUED = 'enqueued'
+CANCELLED = 'cancelled'
+DONE = 'done'
+STARTED = 'started'
+FAILED = 'failed'
+
+STATES = [(WAIT_DEPENDENCIES, 'Wait Dependencies'),
+          (PENDING, 'Pending'),
+          (ENQUEUED, 'Enqueued'),
+          (STARTED, 'Started'),
+          (DONE, 'Done'),
+          (CANCELLED, 'Cancelled'),
+          (FAILED, 'Failed')]
 
 DEFAULT_PRIORITY = 10  # used by the PriorityQueue to sort the jobs
 DEFAULT_MAX_RETRIES = 5
@@ -41,16 +43,13 @@ RETRY_INTERVAL = 10 * 60  # seconds
 _logger = logging.getLogger(__name__)
 
 
-# TODO remove in 15.0 or 16.0, used to keep compatibility as the
+# TODO remove in 13.0 or 14.0, used to keep compatibility as the
 # class has been moved in 'delay'.
 def DelayableRecordset(*args, **kwargs):
     # prevent circular import
     from .delay import DelayableRecordset as dr
-
-    _logger.debug(
-        "DelayableRecordset moved from the queue_job.job"
-        " to the queue_job.delay python module"
-    )
+    _logger.debug("DelayableRecordset moved from the queue_job.job"
+                  " to the queue_job.delay python module")
     return dr(*args, **kwargs)
 
 
@@ -90,11 +89,11 @@ def identity_exact(job_):
     model and method.
     """
     hasher = hashlib.sha1()
-    hasher.update(job_.model_name.encode("utf-8"))
-    hasher.update(job_.method_name.encode("utf-8"))
-    hasher.update(str(sorted(job_.recordset.ids)).encode("utf-8"))
-    hasher.update(str(job_.args).encode("utf-8"))
-    hasher.update(str(sorted(job_.kwargs.items())).encode("utf-8"))
+    hasher.update(job_.model_name.encode('utf-8'))
+    hasher.update(job_.method_name.encode('utf-8'))
+    hasher.update(str(sorted(job_.recordset.ids)).encode('utf-8'))
+    hasher.update(str(job_.args).encode('utf-8'))
+    hasher.update(str(sorted(job_.kwargs.items())).encode('utf-8'))
 
     return hasher.hexdigest()
 
@@ -210,7 +209,6 @@ class Job(object):
         started or executed.
 
     """
-
     @classmethod
     def load(cls, env, job_uuid):
         """Read a single job from the Database
@@ -220,8 +218,7 @@ class Job(object):
         stored = cls.db_records_from_uuids(env, [job_uuid])
         if not stored:
             raise NoSuchJobError(
-                "Job %s does no longer exist in the storage." % job_uuid
-            )
+                'Job %s does no longer exist in the storage.' % job_uuid)
         return cls._load_from_db_record(stored)
 
     @classmethod
@@ -248,17 +245,10 @@ class Job(object):
         if stored.eta:
             eta = stored.eta
 
-        job_ = cls(
-            method,
-            args=args,
-            kwargs=kwargs,
-            priority=stored.priority,
-            eta=eta,
-            job_uuid=stored.uuid,
-            description=stored.name,
-            channel=stored.channel,
-            identity_key=stored.identity_key,
-        )
+        job_ = cls(method, args=args, kwargs=kwargs,
+                   priority=stored.priority, eta=eta, job_uuid=stored.uuid,
+                   description=stored.name, channel=stored.channel,
+                   identity_key=stored.identity_key)
 
         if stored.date_created:
             job_.date_created = stored.date_created
@@ -286,41 +276,28 @@ class Job(object):
         job_.identity_key = stored.identity_key
         job_.worker_pid = stored.worker_pid
 
-        job_.__depends_on_uuids.update(stored.dependencies.get("depends_on", []))
+        job_.__depends_on_uuids.update(
+            stored.dependencies.get('depends_on', [])
+        )
         job_.__reverse_depends_on_uuids.update(
-            stored.dependencies.get("reverse_depends_on", [])
+            stored.dependencies.get('reverse_depends_on', [])
         )
         return job_
 
     def job_record_with_same_identity_key(self):
         """Check if a job to be executed with the same key exists."""
-        existing = (
-            self.env["queue.job"]
-            .sudo()
-            .search(
-                [
-                    ("identity_key", "=", self.identity_key),
-                    ("state", "in", [PENDING, ENQUEUED]),
-                ],
-                limit=1,
-            )
+        existing = self.env['queue.job'].sudo().search(
+            [('identity_key', '=', self.identity_key),
+             ('state', 'in', [PENDING, ENQUEUED])],
+            limit=1
         )
         return existing
 
     # TODO to deprecate (not called anymore)
     @classmethod
-    def enqueue(
-        cls,
-        func,
-        args=None,
-        kwargs=None,
-        priority=None,
-        eta=None,
-        max_retries=None,
-        description=None,
-        channel=None,
-        identity_key=None,
-    ):
+    def enqueue(cls, func, args=None, kwargs=None,
+                priority=None, eta=None, max_retries=None, description=None,
+                channel=None, identity_key=None):
         """Create a Job and enqueue it in the queue. Return the job uuid.
 
         This expects the arguments specific to the job to be already extracted
@@ -330,17 +307,10 @@ class Job(object):
         no job is created and the existing job is returned
 
         """
-        new_job = cls(
-            func=func,
-            args=args,
-            kwargs=kwargs,
-            priority=priority,
-            eta=eta,
-            max_retries=max_retries,
-            description=description,
-            channel=channel,
-            identity_key=identity_key,
-        )
+        new_job = cls(func=func, args=args,
+                      kwargs=kwargs, priority=priority, eta=eta,
+                      max_retries=max_retries, description=description,
+                      channel=channel, identity_key=identity_key)
         return new_job._enqueue_job()
 
     # TODO to deprecate (not called anymore)
@@ -349,10 +319,10 @@ class Job(object):
             existing = self.job_record_with_same_identity_key()
             if existing:
                 _logger.debug(
-                    "a job has not been enqueued due to having "
-                    "the same identity key (%s) than job %s",
+                    'a job has not been enqueued due to having '
+                    'the same identity key (%s) than job %s',
                     self.identity_key,
-                    existing.uuid,
+                    existing.uuid
                 )
                 return Job._load_from_db_record(existing)
         self.store()
@@ -362,36 +332,27 @@ class Job(object):
             self.method_name,
             self.args,
             self.kwargs,
-            self.uuid,
+            self.uuid
         )
         return self
 
     @staticmethod
     def db_record_from_uuid(env, job_uuid):
-        # TODO remove in 15.0 or 16.0
+        # TODO remove in 13.0 or 14.0
         _logger.debug("deprecated, use 'db_records_from_uuids")
         return Job.db_records_from_uuids(env, [job_uuid])
 
     @staticmethod
     def db_records_from_uuids(env, job_uuids):
-        model = env["queue.job"].sudo()
-        record = model.search([("uuid", "in", tuple(job_uuids))])
+        model = env['queue.job'].sudo()
+        record = model.search([('uuid', 'in', tuple(job_uuids))])
         return record.with_env(env).sudo()
 
-    def __init__(
-        self,
-        func,
-        args=None,
-        kwargs=None,
-        priority=None,
-        eta=None,
-        job_uuid=None,
-        max_retries=None,
-        description=None,
-        channel=None,
-        identity_key=None,
-    ):
-        """Create a Job
+    def __init__(self, func,
+                 args=None, kwargs=None, priority=None,
+                 eta=None, job_uuid=None, max_retries=None,
+                 description=None, channel=None, identity_key=None):
+        """ Create a Job
 
         :param func: function to execute
         :type func: function
@@ -437,8 +398,8 @@ class Job(object):
         self.recordset = recordset
 
         self.env = env
-        self.job_model = self.env["queue.job"]
-        self.job_model_name = "queue.job"
+        self.job_model = self.env['queue.job']
+        self.job_model_name = 'queue.job'
 
         self.job_config = (
             self.env["queue.job.function"].sudo().job_config(self.job_function_name)
@@ -489,10 +450,15 @@ class Job(object):
         self.exc_message = None
         self.exc_info = None
 
-        if "company_id" in env.context:
-            company_id = env.context["company_id"]
+        if 'company_id' in env.context:
+            company_id = env.context['company_id']
         else:
-            company_id = env.company.id
+            company_model = env['res.company']
+            company_model = company_model.sudo(self.user_id)
+            company_id = company_model._company_default_get(
+                object='queue.job',
+                field='company_id'
+            ).id
         self.company_id = company_id
         self._eta = None
         self.eta = eta
@@ -501,7 +467,7 @@ class Job(object):
 
     def add_depends(self, jobs):
         if self in jobs:
-            raise ValueError("job cannot depend on itself")
+            raise ValueError('job cannot depend on itself')
         self.__depends_on_uuids |= {j.uuid for j in jobs}
         self._depends_on.update(jobs)
         for parent in jobs:
@@ -529,9 +495,9 @@ class Job(object):
                 # change the exception type but keep the original
                 # traceback and message:
                 # http://blog.ianbicking.org/2007/09/12/re-raising-exceptions/
-                new_exc = FailedJobError(
-                    "Max. retries (%d) reached: %s" % (self.max_retries, value or type_)
-                )
+                new_exc = FailedJobError("Max. retries (%d) reached: %s" %
+                                         (self.max_retries, value or type_)
+                                         )
                 raise new_exc from err
             raise
 
@@ -567,7 +533,6 @@ class Job(object):
             AND state = %s;
         """
         self.env.cr.execute(sql, (PENDING, self.uuid, DONE, WAIT_DEPENDENCIES))
-        self.env["queue.job"].invalidate_cache(["state"])
 
     def store(self):
         """Store the Job"""
@@ -587,49 +552,51 @@ class Job(object):
             )
 
     def _store_values(self, create=False):
-        vals = {
-            "state": self.state,
-            "priority": self.priority,
-            "retry": self.retry,
-            "max_retries": self.max_retries,
-            "exc_name": self.exc_name,
-            "exc_message": self.exc_message,
-            "exc_info": self.exc_info,
-            "company_id": self.company_id,
-            "result": str(self.result) if self.result else False,
-            "date_enqueued": False,
-            "date_started": False,
-            "date_done": False,
-            "exec_time": False,
-            "date_cancelled": False,
-            "eta": False,
-            "identity_key": False,
-            "worker_pid": self.worker_pid,
-            "graph_uuid": self.graph_uuid,
-        }
+        vals = {'state': self.state,
+                'priority': self.priority,
+                'retry': self.retry,
+                'max_retries': self.max_retries,
+                'exc_name': self.exc_name,
+                'exc_message': self.exc_message,
+                'exc_info': self.exc_info,
+                'user_id': self.user_id or self.env.uid,
+                'company_id': self.company_id,
+                'result': str(self.result) if self.result else False,
+                'date_enqueued': False,
+                'date_started': False,
+                'date_done': False,
+                'exec_time': False,
+                'date_cancelled': False,
+                'eta': False,
+                'identity_key': False,
+                "worker_pid": self.worker_pid,
+                'graph_uuid': self.graph_uuid,
+                }
 
         if self.date_enqueued:
-            vals["date_enqueued"] = self.date_enqueued
+            vals['date_enqueued'] = self.date_enqueued
         if self.date_started:
-            vals["date_started"] = self.date_started
+            vals['date_started'] = self.date_started
         if self.date_done:
-            vals["date_done"] = self.date_done
+            vals['date_done'] = self.date_done
         if self.exec_time:
             vals["exec_time"] = self.exec_time
         if self.date_cancelled:
-            vals["date_cancelled"] = self.date_cancelled
+            vals['date_cancelled'] = self.date_cancelled
         if self.eta:
-            vals["eta"] = self.eta
+            vals['eta'] = self.eta
         if self.identity_key:
-            vals["identity_key"] = self.identity_key
+            vals['identity_key'] = self.identity_key
 
         dependencies = {
-            "depends_on": [parent.uuid for parent in self.depends_on],
-            "reverse_depends_on": [
+            'depends_on': [
+                parent.uuid for parent in self.depends_on
+            ],
+            'reverse_depends_on': [
                 children.uuid for children in self.reverse_depends_on
             ],
         }
-        vals["dependencies"] = dependencies
+        vals['dependencies'] = dependencies
 
         if create:
             vals.update(
@@ -700,6 +667,7 @@ class Job(object):
     @property
     def func(self):
         recordset = self.recordset.with_context(job_uuid=self.uuid)
+        recordset = recordset.sudo(self.user_id)
         return getattr(recordset, self.method_name)
 
     @property
@@ -728,7 +696,9 @@ class Job(object):
     @property
     def depends_on(self):
         if not self._depends_on:
-            self._depends_on = Job.load_many(self.env, self.__depends_on_uuids)
+            self._depends_on = Job.load_many(
+                self.env, self.__depends_on_uuids
+            )
         return self._depends_on
 
     @property
@@ -746,11 +716,11 @@ class Job(object):
         elif self.func.__doc__:
             return self.func.__doc__.splitlines()[0].strip()
         else:
-            return "{}.{}".format(self.model_name, self.func.__name__)
+            return '%s.%s' % (self.model_name, self.func.__name__)
 
     @property
     def uuid(self):
-        """Job ID, this is an UUID"""
+        """Job ID, this is an UUID """
         if self._uuid is None:
             self._uuid = str(uuid.uuid4())
         return self._uuid
@@ -801,6 +771,7 @@ class Job(object):
         self.date_started = None
         self.date_done = None
         self.worker_pid = None
+        self.date_done = None
         self.date_cancelled = None
         if reset_retry:
             self.retry = 0
@@ -839,10 +810,13 @@ class Job(object):
                 setattr(self, k, v)
 
     def __repr__(self):
-        return "<Job %s, priority:%d>" % (self.uuid, self.priority)
+        return '<Job %s, priority:%d>' % (self.uuid, self.priority)
 
     def _get_retry_seconds(self, seconds=None):
         retry_pattern = self.job_config.retry_pattern
+        if not retry_pattern:
+            # TODO deprecated by :job-no-decorator:
+            retry_pattern = getattr(self.func, "retry_pattern", None)
         if not seconds and retry_pattern:
             # ordered from higher to lower count of retries
             patt = sorted(retry_pattern.items(), key=lambda t: t[0])
@@ -854,8 +828,6 @@ class Job(object):
                     break
         elif not seconds:
             seconds = RETRY_INTERVAL
-        if isinstance(seconds, (list, tuple)):
-            seconds = randint(seconds[0], seconds[1])
         return seconds
 
     def postpone(self, result=None, seconds=None):
@@ -878,19 +850,265 @@ class Job(object):
             return None
 
         funcname = self.job_config.related_action_func_name
+        if not funcname and hasattr(self.func, 'related_action'):
+            # TODO deprecated by :job-no-decorator:
+            funcname = self.func.related_action
+            # decorator is set but empty: disable the default one
+            if not funcname:
+                return None
+
         if not funcname:
             funcname = record._default_related_action
         if not isinstance(funcname, str):
-            raise ValueError(
-                "related_action must be the name of the "
-                "method on queue.job as string"
-            )
+            raise ValueError('related_action must be the name of the '
+                             'method on queue.job as string')
         action = getattr(record, funcname)
         action_kwargs = self.job_config.related_action_kwargs
+        if not action_kwargs:
+            # TODO deprecated by :job-no-decorator:
+            action_kwargs = getattr(self.func, 'kwargs', {})
         return action(**action_kwargs)
 
 
 def _is_model_method(func):
-    return inspect.ismethod(func) and isinstance(
-        func.__self__.__class__, odoo.models.MetaModel
+    return (inspect.ismethod(func) and
+            isinstance(func.__self__.__class__, odoo.models.MetaModel))
+
+
+# TODO deprecated by :job-no-decorator:
+def job(func=None, default_channel='root', retry_pattern=None):
+    """Decorator for job methods.
+
+    Deprecated. Use ``queue.job.function`` XML records (details in
+    ``readme/USAGE.rst``).
+
+    It enables the possibility to use a Model's method as a job function.
+
+    Optional argument:
+
+    :param default_channel: the channel wherein the job will be assigned. This
+                            channel is set at the installation of the module
+                            and can be manually changed later using the views.
+    :param retry_pattern: The retry pattern to use for postponing a job.
+                          If a job is postponed and there is no eta
+                          specified, the eta will be determined from the
+                          dict in retry_pattern. When no retry pattern
+                          is provided, jobs will be retried after
+                          :const:`RETRY_INTERVAL` seconds.
+    :type retry_pattern: dict(retry_count,retry_eta_seconds)
+
+    Indicates that a method of a Model can be delayed in the Job Queue.
+
+    When a method has the ``@job`` decorator, its calls can then be delayed
+    with::
+
+        recordset.with_delay(priority=10).the_method(args, **kwargs)
+
+    Where ``the_method`` is the method decorated with ``@job``. Its arguments
+    and keyword arguments will be kept in the Job Queue for its asynchronous
+    execution.
+
+    ``default_channel`` indicates in which channel the job must be executed
+
+    ``retry_pattern`` is a dict where keys are the count of retries and the
+    values are the delay to postpone a job.
+
+    Example:
+
+    .. code-block:: python
+
+        class ProductProduct(models.Model):
+            _inherit = 'product.product'
+
+            @api.multi
+            @job
+            def export_one_thing(self, one_thing):
+                # work
+                # export one_thing
+
+        # [...]
+
+        env['a.model'].export_one_thing(the_thing_to_export)
+        # => normal and synchronous function call
+
+        env['a.model'].with_delay().export_one_thing(the_thing_to_export)
+        # => the job will be executed as soon as possible
+
+        delayable = env['a.model'].with_delay(priority=30, eta=60*60*5)
+        delayable.export_one_thing(the_thing_to_export)
+        # => the job will be executed with a low priority and not before a
+        # delay of 5 hours from now
+
+        @job(default_channel='root.subchannel')
+        def export_one_thing(one_thing):
+            # work
+            # export one_thing
+
+        @job(retry_pattern={1: 10 * 60,
+                            5: 20 * 60,
+                            10: 30 * 60,
+                            15: 12 * 60 * 60})
+        def retryable_example():
+            # 5 first retries postponed 10 minutes later
+            # retries 5 to 10 postponed 20 minutes later
+            # retries 10 to 15 postponed 30 minutes later
+            # all subsequent retries postponed 12 hours later
+            raise RetryableJobError('Must be retried later')
+
+        env['a.model'].with_delay().retryable_example()
+
+
+    See also: :py:func:`related_action` a related action can be attached
+    to a job
+    """
+    if func is None:
+        return functools.partial(job, default_channel=default_channel,
+                                 retry_pattern=retry_pattern)
+
+    xml_fields = [
+        '    <field name="model_id" ref="[insert model xmlid]" />\n'
+        '    <field name="method">_test_job</field>\n'
+    ]
+    if default_channel:
+        xml_fields.append('    <field name="channel_id" ref="[insert channel xmlid]"/>')
+    if retry_pattern:
+        xml_fields.append('    <field name="retry_pattern">{retry_pattern}</field>')
+
+    _logger.info(
+        "@job is deprecated and no longer needed (on %s), it is advised to use an "
+        "XML record (activate DEBUG log for snippet)",
+        func.__name__,
     )
+    if _logger.isEnabledFor(logging.DEBUG):
+        xml_record = (
+            '<record id="job_function_[insert model]_{method}"'
+            ' model="queue.job.function">\n' + "\n".join(xml_fields) + "\n</record>"
+        ).format(**{"method": func.__name__, "retry_pattern": retry_pattern})
+        _logger.debug(
+            "XML snippet (to complete) for replacing @job on %s:\n%s",
+            func.__name__,
+            xml_record,
+        )
+
+    def delay_from_model(*args, **kwargs):
+        raise AttributeError(
+            "method.delay() can no longer be used, the general form is "
+            "env['res.users'].with_delay().method()"
+            )
+
+    assert default_channel == 'root' or default_channel.startswith('root.'), (
+        "The channel path must start by 'root'")
+    assert retry_pattern is None or isinstance(retry_pattern, dict), (
+        "retry_pattern must be a dict"
+    )
+
+    delay_func = delay_from_model
+
+    func.delayable = True
+    func.delay = delay_func
+    func.retry_pattern = retry_pattern
+    func.default_channel = default_channel
+    return func
+
+
+# TODO deprecated by :job-no-decorator:
+def related_action(action=None, **kwargs):
+    """Attach a *Related Action* to a job (decorator)
+
+    Deprecated. Use ``queue.job.function`` XML records (details in
+    ``readme/USAGE.rst``).
+
+    A *Related Action* will appear as a button on the Odoo view.
+    The button will execute the action, usually it will open the
+    form view of the record related to the job.
+
+    The ``action`` must be a method on the `queue.job` model.
+
+    Example usage:
+
+    .. code-block:: python
+
+        class QueueJob(models.Model):
+            _inherit = 'queue.job'
+
+            @api.multi
+            def related_action_partner(self):
+                self.ensure_one()
+                model = self.model_name
+                partner = self.records
+                # possibly get the real ID if partner_id is a binding ID
+                action = {
+                    'name': _("Partner"),
+                    'type': 'ir.actions.act_window',
+                    'res_model': model,
+                    'view_type': 'form',
+                    'view_mode': 'form',
+                    'res_id': partner.id,
+                }
+                return action
+
+        class ResPartner(models.Model):
+            _inherit = 'res.partner'
+
+            @api.multi
+            @job
+            @related_action(action='related_action_partner')
+            def export_partner(self):
+                # ...
+
+    The kwargs are transmitted to the action:
+
+    .. code-block:: python
+
+        class QueueJob(models.Model):
+            _inherit = 'queue.job'
+
+            @api.multi
+            def related_action_product(self, extra_arg=1):
+                assert extra_arg == 2
+                model = self.model_name
+                ...
+
+        class ProductProduct(models.Model):
+            _inherit = 'product.product'
+
+            @api.multi
+            @job
+            @related_action(action='related_action_product', extra_arg=2)
+            def export_product(self):
+                # ...
+
+    """
+    def decorate(func):
+        related_action_dict = {
+            "func_name": action,
+        }
+        if kwargs:
+            related_action_dict["kwargs"] = kwargs
+
+        xml_fields = (
+            '    <field name="model_id" ref="[insert model xmlid]" />\n'
+            '    <field name="method">_test_job</field>\n'
+            '    <field name="related_action">{related_action}</field>'
+        )
+
+        _logger.info(
+            "@related_action is deprecated and no longer needed (on %s),"
+            " it is advised to use an XML record (activate DEBUG log for snippet)",
+            func.__name__,
+        )
+        if _logger.isEnabledFor(logging.DEBUG):
+            xml_record = (
+                '<record id="job_function_[insert model]_{method}"'
+                ' model="queue.job.function">\n' + xml_fields + "\n</record>"
+            ).format(**{"method": func.__name__, "related_action": action})
+            _logger.debug(
+                "XML snippet (to complete) for replacing @related_action on %s:\n%s",
+                func.__name__,
+                xml_record,
+            )
+
+        func.related_action = action
+        func.kwargs = kwargs
+        return func
+    return decorate

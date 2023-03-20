@@ -2,13 +2,12 @@
 # license lgpl-3.0 or later (http://www.gnu.org/licenses/lgpl.html)
 
 import json
-from datetime import date, datetime
+from datetime import datetime, date
 
 import dateutil
 import lxml
 
 from odoo import fields, models
-from odoo.tools.func import lazy
 
 
 class JobSerialized(fields.Field):
@@ -22,12 +21,11 @@ class JobSerialized(fields.Field):
     (see JobEncoder and JobDecoder).
     """
 
-    type = "job_serialized"
-    column_type = ("text", "text")
+    type = 'job_serialized'
+    column_type = ('text', 'text')
 
-    _base_type = None
+    _slots = {"_base_type": type}
 
-    # these are the default values when we convert an empty value
     _default_json_mapping = {
         dict: "{}",
         list: "[]",
@@ -69,30 +67,24 @@ class JobSerialized(fields.Field):
 class JobEncoder(json.JSONEncoder):
     """Encode Odoo recordsets so that we can later recompose them"""
 
-    def _get_record_context(self, obj):
-        return obj._job_prepare_context_before_enqueue()
-
     def default(self, obj):
         if isinstance(obj, models.BaseModel):
-            return {
-                "_type": "odoo_recordset",
-                "model": obj._name,
-                "ids": obj.ids,
-                "uid": obj.env.uid,
-                "su": obj.env.su,
-                "context": self._get_record_context(obj),
-            }
+            return {'_type': 'odoo_recordset',
+                    'model': obj._name,
+                    'ids': obj.ids,
+                    'uid': obj.env.uid,
+                    }
         elif isinstance(obj, datetime):
-            return {"_type": "datetime_isoformat", "value": obj.isoformat()}
+            return {'_type': 'datetime_isoformat',
+                    'value': obj.isoformat()}
         elif isinstance(obj, date):
-            return {"_type": "date_isoformat", "value": obj.isoformat()}
+            return {'_type': 'date_isoformat',
+                    'value': obj.isoformat()}
         elif isinstance(obj, lxml.etree._Element):
             return {
                 "_type": "etree_element",
                 "value": lxml.etree.tostring(obj, encoding=str),
             }
-        elif isinstance(obj, lazy):
-            return obj._value
         return json.JSONEncoder.default(self, obj)
 
 
@@ -100,24 +92,27 @@ class JobDecoder(json.JSONDecoder):
     """Decode json, recomposing recordsets"""
 
     def __init__(self, *args, **kwargs):
-        env = kwargs.pop("env")
-        super().__init__(object_hook=self.object_hook, *args, **kwargs)
+        env = kwargs.pop('env')
+        super(JobDecoder, self).__init__(
+            object_hook=self.object_hook, *args, **kwargs
+        )
         assert env
         self.env = env
 
     def object_hook(self, obj):
-        if "_type" not in obj:
+        if '_type' not in obj:
             return obj
-        type_ = obj["_type"]
-        if type_ == "odoo_recordset":
-            model = self.env(user=obj.get("uid"), su=obj.get("su"))[obj["model"]]
-            if obj.get("context"):
-                model = model.with_context(**obj.get("context"))
-            return model.browse(obj["ids"])
-        elif type_ == "datetime_isoformat":
-            return dateutil.parser.parse(obj["value"])
-        elif type_ == "date_isoformat":
-            return dateutil.parser.parse(obj["value"]).date()
+        type_ = obj['_type']
+        if type_ == 'odoo_recordset':
+            model = self.env[obj['model']]
+            if obj.get('uid'):
+                model = model.sudo(obj['uid'])
+
+            return model.browse(obj['ids'])
+        elif type_ == 'datetime_isoformat':
+            return dateutil.parser.parse(obj['value'])
+        elif type_ == 'date_isoformat':
+            return dateutil.parser.parse(obj['value']).date()
         elif type_ == "etree_element":
             return lxml.etree.fromstring(obj["value"])
         return obj

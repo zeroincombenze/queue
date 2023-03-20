@@ -6,6 +6,7 @@ import itertools
 import logging
 import os
 import uuid
+
 from collections import defaultdict, deque
 
 from .job import Job
@@ -57,8 +58,7 @@ class Graph:
     This graph is not specifically designed to hold :class:`~Delayable`
     instances, although ultimately it is used for this purpose.
     """
-
-    __slots__ = "_graph"
+    __slots__ = ('_graph')
 
     def __init__(self, graph=None):
         if graph:
@@ -104,8 +104,8 @@ class Graph:
         >>> sorted(self.paths(3))
         [[3, 1, 2, 4]]
         """
-        path = [vertex]  # path traversed so far
-        seen = {vertex}  # set of vertices in path
+        path = [vertex]   # path traversed so far
+        seen = {vertex}   # set of vertices in path
 
         def search():
             dead_end = True
@@ -119,7 +119,6 @@ class Graph:
                     seen.remove(neighbour)
             if dead_end:
                 yield list(path)
-
         yield from search()
 
     def topological_sort(self):
@@ -155,11 +154,14 @@ class Graph:
         return set(self._graph.keys()) - dependency_vertices
 
     def __repr__(self):
-        paths = [path for vertex in self.root_vertices() for path in self.paths(vertex)]
+        paths = [
+            path for vertex in self.root_vertices()
+            for path in self.paths(vertex)
+        ]
         lines = []
         for path in paths:
-            lines.append(" → ".join(repr(vertex) for vertex in path))
-        return "\n".join(lines)
+            lines.append(' → '.join(repr(vertex) for vertex in path))
+        return '\n'.join(lines)
 
 
 class DelayableGraph(Graph):
@@ -217,16 +219,17 @@ class DelayableGraph(Graph):
         In tests, prefer to use
         :func:`odoo.addons.queue_job.tests.common.trap_jobs`.
         """
-        if os.getenv("TEST_QUEUE_JOB_NO_DELAY"):
-            _logger.warning(
-                "`TEST_QUEUE_JOB_NO_DELAY` env var found. NO JOB scheduled."
+        if os.getenv('TEST_QUEUE_JOB_NO_DELAY'):
+            _logger.warn(
+                '`TEST_QUEUE_JOB_NO_DELAY` env var found. NO JOB scheduled.'
             )
             return True
-        envs = {vertex.recordset.env for vertex in vertices}
+        envs = set(vertex.recordset.env for vertex in vertices)
         for env in envs:
-            if env.context.get("test_queue_job_no_delay"):
-                _logger.warning(
-                    "`test_queue_job_no_delay` ctx key found." " NO JOB scheduled."
+            if env.context.get('test_queue_job_no_delay'):
+                _logger.warn(
+                    '`test_queue_job_no_delay` ctx key found.'
+                    ' NO JOB scheduled.'
                 )
                 return True
         return False
@@ -244,9 +247,11 @@ class DelayableGraph(Graph):
                     " have a graph uuid" % (jobs[0],)
                 )
         else:
-            graph_uuids = {job.graph_uuid for job in jobs if job.graph_uuid}
+            graph_uuids = set(job.graph_uuid for job in jobs if job.graph_uuid)
             if len(graph_uuids) > 1:
-                raise ValueError("Jobs cannot have dependencies between several graphs")
+                raise ValueError(
+                    "Jobs cannot have dependencies between several graphs"
+                )
             elif len(graph_uuids) == 1:
                 graph_uuid = graph_uuids.pop()
             else:
@@ -263,7 +268,9 @@ class DelayableGraph(Graph):
         for vertex in vertices:
             vertex._build_job()
 
-        self._ensure_same_graph_uuid([vertex._generated_job for vertex in vertices])
+        self._ensure_same_graph_uuid(
+            [vertex._generated_job for vertex in vertices]
+        )
 
         if self._has_to_execute_directly(vertices):
             self._execute_graph_direct(graph)
@@ -322,8 +329,7 @@ class DelayableChain:
     Important: :meth:`~delay` must be called on the top-level
     delayable/chain/group object of the graph.
     """
-
-    __slots__ = ("_graph", "__head", "__tail")
+    __slots__ = ('_graph', '__head', '__tail')
 
     def __init__(self, *delayables):
         self._graph = DelayableGraph()
@@ -344,7 +350,7 @@ class DelayableChain:
 
     def __repr__(self):
         inner_graph = "\n\t".join(repr(self._graph).split("\n"))
-        return "DelayableChain(\n\t{}\n)".format(inner_graph)
+        return 'DelayableChain(\n\t{}\n)'.format(inner_graph)
 
     def on_done(self, *delayables):
         """Connects the current chain to other delayables/chains/groups
@@ -379,8 +385,7 @@ class DelayableGroup:
     Important: :meth:`~delay` must be called on the top-level
     delayable/chain/group object of the graph.
     """
-
-    __slots__ = ("_graph", "_delayables")
+    __slots__ = ('_graph', '_delayables')
 
     def __init__(self, *delayables):
         self._graph = DelayableGraph()
@@ -389,14 +394,18 @@ class DelayableGroup:
             self._graph.add_vertex(delayable)
 
     def _head(self):
-        return itertools.chain.from_iterable(node._head() for node in self._delayables)
+        return itertools.chain.from_iterable(
+            node._head() for node in self._delayables
+        )
 
     def _tail(self):
-        return itertools.chain.from_iterable(node._tail() for node in self._delayables)
+        return itertools.chain.from_iterable(
+            node._tail() for node in self._delayables
+        )
 
     def __repr__(self):
         inner_graph = "\n\t".join(repr(self._graph).split("\n"))
-        return "DelayableGroup(\n\t{}\n)".format(inner_graph)
+        return 'DelayableGroup(\n\t{}\n)'.format(inner_graph)
 
     def on_done(self, *delayables):
         """Connects the current group to other delayables/chains/groups
@@ -439,34 +448,18 @@ class Delayable:
     Important: :meth:`delay()` must be called on the top-level
     delayable/chain/group object of the graph.
     """
-
     _properties = (
-        "priority",
-        "eta",
-        "max_retries",
-        "description",
-        "channel",
-        "identity_key",
+        'priority', 'eta', 'max_retries', 'description',
+        'channel', 'identity_key'
     )
     __slots__ = _properties + (
-        "recordset",
-        "_graph",
-        "_job_method",
-        "_job_args",
-        "_job_kwargs",
-        "_generated_job",
+        'recordset', '_graph', '_job_method', '_job_args', '_job_kwargs',
+        '_generated_job',
     )
 
-    def __init__(
-        self,
-        recordset,
-        priority=None,
-        eta=None,
-        max_retries=None,
-        description=None,
-        channel=None,
-        identity_key=None,
-    ):
+    def __init__(self, recordset, priority=None, eta=None,
+                 max_retries=None, description=None, channel=None,
+                 identity_key=None):
         self._graph = DelayableGraph()
         self._graph.add_vertex(self)
 
@@ -492,21 +485,21 @@ class Delayable:
         return [self]
 
     def __repr__(self):
-        job_method = ""
-        if self._job_method:
-            job_method = self._job_method.__name__
-        return "Delayable({}.{}({}, {}))".format(
-            self.recordset, job_method, self._job_args, self._job_kwargs
+        return 'Delayable({}.{}({}, {}))'.format(
+            self.recordset, self._job_method.__name__,
+            self._job_args, self._job_kwargs
         )
 
     def __del__(self):
         if not self._generated_job:
-            _logger.warning("Delayable %s was prepared but never delayed", self)
+            _logger.warning(
+                'Delayable %s was prepared but never delayed', self
+            )
 
     def _set_from_dict(self, properties):
         for key, value in properties.items():
             if key not in self._properties:
-                raise ValueError("No property %s" % (key,))
+                raise ValueError('No property %s' % (key,))
             setattr(self, key, value)
 
     def set(self, *args, **kwargs):
@@ -560,7 +553,8 @@ class Delayable:
             return super().__getattr__(name)
         if name in self.recordset:
             raise AttributeError(
-                "only methods can be delayed (%s called on %s)" % (name, self.recordset)
+                'only methods can be delayed (%s called on %s)' %
+                (name, self.recordset)
             )
         recordset_method = getattr(self.recordset, name)
         self._job_method = recordset_method
@@ -586,18 +580,11 @@ class DelayableRecordset(object):
     by :meth:`~odoo.addons.queue_job.models.base.Base.with_delay`
     """
 
-    __slots__ = ("delayable",)
+    __slots__ = ('delayable',)
 
-    def __init__(
-        self,
-        recordset,
-        priority=None,
-        eta=None,
-        max_retries=None,
-        description=None,
-        channel=None,
-        identity_key=None,
-    ):
+    def __init__(self, recordset, priority=None, eta=None,
+                 max_retries=None, description=None, channel=None,
+                 identity_key=None):
         self.delayable = Delayable(
             recordset,
             priority=priority,
@@ -616,13 +603,12 @@ class DelayableRecordset(object):
         def _delay_delayable(*args, **kwargs):
             getattr(self.delayable, name)(*args, **kwargs).delay()
             return self.delayable._generated_job
-
         return _delay_delayable
 
     def __str__(self):
         return "DelayableRecordset(%s%s)" % (
             self.delayable.recordset._name,
-            getattr(self.delayable.recordset, "_ids", ""),
+            getattr(self.delayable.recordset, '_ids', "")
         )
 
     __repr__ = __str__

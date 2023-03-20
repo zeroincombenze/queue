@@ -8,16 +8,14 @@ import time
 
 from odoo.service import server
 from odoo.tools import config
-
 try:
     from odoo.addons.server_environment import serv_config
-
-    if serv_config.has_section("queue_job"):
-        queue_job_config = serv_config["queue_job"]
+    if serv_config.has_section('queue_job'):
+        queue_job_config = serv_config['queue_job']
     else:
         queue_job_config = {}
 except ImportError:
-    queue_job_config = config.misc.get("queue_job", {})
+    queue_job_config = config.misc.get('queue_job', {})
 
 
 from .runner import QueueJobRunner, _channels
@@ -33,6 +31,7 @@ START_DELAY = 5
 
 
 class QueueJobRunnerThread(Thread):
+
     def __init__(self):
         Thread.__init__(self)
         self.daemon = True
@@ -48,61 +47,46 @@ class QueueJobRunnerThread(Thread):
 
 
 class WorkerJobRunner(server.Worker):
-    """Jobrunner workers"""
+    """ Jobrunner workers """
 
     def __init__(self, multi):
-        super().__init__(multi)
+        super(WorkerJobRunner, self).__init__(multi)
         self.watchdog_timeout = None
         self.runner = QueueJobRunner.from_environ_or_config()
-        self._recover = False
 
     def sleep(self):
         pass
 
     def signal_handler(self, sig, frame):
         _logger.debug("WorkerJobRunner (%s) received signal %s", self.pid, sig)
-        super().signal_handler(sig, frame)
+        super(WorkerJobRunner, self).signal_handler(sig, frame)
         self.runner.stop()
 
     def process_work(self):
-        if self._recover:
-            _logger.info("WorkerJobRunner (%s) runner is reinitialized", self.pid)
-            self.runner = QueueJobRunner.from_environ_or_config()
-            self._recover = False
         _logger.debug("WorkerJobRunner (%s) starting up", self.pid)
         time.sleep(START_DELAY)
         self.runner.run()
-
-    def signal_time_expired_handler(self, n, stack):
-        _logger.info(
-            "Worker (%d) CPU time limit (%s) reached.Stop gracefully and recover",
-            self.pid,
-            config["limit_time_cpu"],
-        )
-        self._recover = True
-        self.runner.stop()
 
 
 runner_thread = None
 
 
 def _is_runner_enabled():
-    return not _channels().strip().startswith("root:0")
+    return not _channels().strip().startswith('root:0')
 
 
 def _start_runner_thread(server_type):
     global runner_thread
-    if not config["stop_after_init"]:
+    if not config['stop_after_init']:
         if _is_runner_enabled():
-            _logger.info("starting jobrunner thread (in %s)", server_type)
+            _logger.info("starting jobrunner thread (in %s)",
+                         server_type)
             runner_thread = QueueJobRunnerThread()
             runner_thread.start()
         else:
-            _logger.info(
-                "jobrunner thread (in %s) NOT started, "
-                "because the root channel's capacity is set to 0",
-                server_type,
-            )
+            _logger.info("jobrunner thread (in %s) NOT started, "
+                         "because the root channel's capacity is set to 0",
+                         server_type)
 
 
 orig_prefork__init__ = server.PreforkServer.__init__
@@ -120,7 +104,7 @@ def prefork__init__(server, app):
 
 def prefork_process_spawn(server):
     orig_prefork_process_spawn(server)
-    if not hasattr(server, "jobrunner"):
+    if not hasattr(server, 'jobrunner'):
         # if 'queue_job' is not in server wide modules, PreforkServer is
         # not initialized with a 'jobrunner' attribute, skip this
         return
@@ -130,7 +114,7 @@ def prefork_process_spawn(server):
 
 def prefork_worker_pop(server, pid):
     res = orig_prefork_worker_pop(server, pid)
-    if not hasattr(server, "jobrunner"):
+    if not hasattr(server, 'jobrunner'):
         # if 'queue_job' is not in server wide modules, PreforkServer is
         # not initialized with a 'jobrunner' attribute, skip this
         return res

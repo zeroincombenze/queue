@@ -2,8 +2,8 @@
 # Copyright 2013-2016 Camptocamp SA
 # License LGPL-3.0 or later (http://www.gnu.org/licenses/lgpl.html)
 
-import logging
 import random
+import logging
 import time
 import traceback
 from io import StringIO
@@ -16,8 +16,8 @@ from odoo import _, http, tools
 from odoo.service.model import PG_CONCURRENCY_ERRORS_TO_RETRY
 
 from ..delay import chain, group
-from ..exception import FailedJobError, NothingToDoJob, RetryableJobError
-from ..job import ENQUEUED, Job
+from ..job import Job, ENQUEUED
+from ..exception import (RetryableJobError, FailedJobError, NothingToDoJob)
 
 _logger = logging.getLogger(__name__)
 
@@ -27,19 +27,19 @@ DEPENDS_MAX_TRIES_ON_CONCURRENCY_FAILURE = 5
 
 
 class RunJobController(http.Controller):
+
     def _try_perform_job(self, env, job):
         """Try to perform the job."""
         job.set_started()
         job.store()
         env.cr.commit()
-        _logger.debug("%s started", job)
+        _logger.debug('%s started', job)
 
         job.perform()
         job.set_done()
         job.store()
-        env["base"].flush()
         env.cr.commit()
-        _logger.debug("%s done", job)
+        _logger.debug('%s done', job)
 
     def _enqueue_dependent_jobs(self, env, job):
         tries = 0
@@ -53,24 +53,37 @@ class RunJobController(http.Controller):
                     raise
                 if tries >= DEPENDS_MAX_TRIES_ON_CONCURRENCY_FAILURE:
                     _logger.info(
-                        "%s, maximum number of tries reached to update dependencies",
-                        errorcodes.lookup(err.pgcode),
+                        "%s, maximum number of tries reached to"
+                        " update dependencies",
+                        errorcodes.lookup(err.pgcode)
                     )
                     raise
-                wait_time = random.uniform(0.0, 2**tries)
+                wait_time = random.uniform(0.0, 2 ** tries)
                 tries += 1
                 _logger.info(
                     "%s, retry %d/%d in %.04f sec...",
                     errorcodes.lookup(err.pgcode),
                     tries,
                     DEPENDS_MAX_TRIES_ON_CONCURRENCY_FAILURE,
-                    wait_time,
+                    wait_time
                 )
                 time.sleep(wait_time)
             else:
                 break
 
-    @http.route("/queue_job/runjob", type="http", auth="none", save_session=False)
+    @http.route('/queue_job/session', type='http', auth="none")
+    def session(self):
+        """Used by the jobrunner to spawn a session
+
+        The queue jobrunner uses anonymous sessions when it calls
+        ``/queue_job/runjob``.  To avoid having thousands of anonymous
+        sessions, before running jobs, it creates a ``requests.Session``
+        and does a GET on ``/queue_job/session``, providing it a cookie
+        which will be used for subsequent calls to runjob.
+        """
+        return ''
+
+    @http.route('/queue_job/runjob', type='http', auth='none')
     def runjob(self, db, job_uuid, **kw):
         http.request.session.db = db
         env = http.request.env(user=odoo.SUPERUSER_ID)
@@ -87,15 +100,16 @@ class RunJobController(http.Controller):
 
         # ensure the job to run is in the correct state and lock the record
         env.cr.execute(
-            "SELECT state FROM queue_job WHERE uuid=%s AND state=%s FOR UPDATE",
-            (job_uuid, ENQUEUED),
+            "SELECT state FROM queue_job "
+            "WHERE uuid=%s AND state=%s "
+            "FOR UPDATE",
+            (job_uuid, ENQUEUED)
         )
         if not env.cr.fetchone():
-            _logger.warning(
+            _logger.warn(
                 "was requested to run job %s, but it does not exist, "
                 "or is not in state %s",
-                job_uuid,
-                ENQUEUED,
+                job_uuid, ENQUEUED
             )
             return ""
 
@@ -111,16 +125,17 @@ class RunJobController(http.Controller):
                 if err.pgcode not in PG_CONCURRENCY_ERRORS_TO_RETRY:
                     raise
 
-                _logger.debug("%s OperationalError, postponed", job)
+                _logger.debug('%s OperationalError, postponed', job)
                 raise RetryableJobError(
-                    tools.ustr(err.pgerror, errors="replace"), seconds=PG_RETRY
+                    tools.ustr(err.pgerror, errors='replace'),
+                    seconds=PG_RETRY
                 )
 
         except NothingToDoJob as err:
             if str(err):
                 msg = str(err)
             else:
-                msg = _("Job interrupted and set to Done: nothing to do.")
+                msg = _('Job interrupted and set to Done: nothing to do.')
             job.set_done(msg)
             job.store()
             env.cr.commit()
@@ -128,12 +143,11 @@ class RunJobController(http.Controller):
         except RetryableJobError as err:
             # delay the job later, requeue
             retry_postpone(job, str(err), seconds=err.seconds)
-            _logger.debug("%s postponed", job)
+            _logger.debug('%s postponed', job)
             # Do not trigger the error up because we don't want an exception
             # traceback in the logs we should have the traceback when all
             # retries are exhausted
             env.cr.rollback()
-            return ""
 
         except (FailedJobError, Exception) as orig_exception:
             buff = StringIO()
@@ -151,9 +165,9 @@ class RunJobController(http.Controller):
                     buff.close()
             raise
 
-        _logger.debug("%s enqueue depends started", job)
+        _logger.debug('%s enqueue depends started', job)
         self._enqueue_dependent_jobs(env, job)
-        _logger.debug("%s enqueue depends done", job)
+        _logger.debug('%s enqueue depends done', job)
 
         return ""
 
@@ -171,24 +185,9 @@ class RunJobController(http.Controller):
 
     @http.route("/queue_job/create_test_job", type="http", auth="user")
     def create_test_job(
-        self,
-        priority=None,
-        max_retries=None,
-        channel=None,
-        description="Test job",
-        size=1,
-        failure_rate=0,
+            self, priority=None, max_retries=None, channel=None,
+            description="Test job", size=1, failure_rate=0
     ):
-        """Create test jobs
-
-        Examples of urls:
-
-        * http://127.0.0.1:8069/queue_job/create_test_job: single job
-        * http://127.0.0.1:8069/queue_job/create_test_job?size=10: a graph of 10 jobs
-        * http://127.0.0.1:8069/queue_job/create_test_job?size=10&failure_rate=0.5:
-          a graph of 10 jobs, half will fail
-
-        """
         if not http.request.env.user.has_group("base.group_erp_manager"):
             raise Forbidden(_("Access Denied"))
 
@@ -225,7 +224,7 @@ class RunJobController(http.Controller):
                 max_retries=max_retries,
                 channel=channel,
                 description=description,
-                failure_rate=failure_rate,
+                failure_rate=failure_rate
             )
 
         if size > 1:
@@ -235,18 +234,14 @@ class RunJobController(http.Controller):
                 max_retries=max_retries,
                 channel=channel,
                 description=description,
-                failure_rate=failure_rate,
+                failure_rate=failure_rate
             )
-        return ""
+        return ''
 
     def _create_single_test_job(
-        self,
-        priority=None,
-        max_retries=None,
-        channel=None,
-        description="Test job",
-        size=1,
-        failure_rate=0,
+            self, priority=None, max_retries=None,
+            channel=None, description="Test job", size=1,
+            failure_rate=0
     ):
         delayed = (
             http.request.env["queue.job"]
@@ -258,19 +253,14 @@ class RunJobController(http.Controller):
             )
             ._test_job(failure_rate=failure_rate)
         )
-        return "job uuid: %s" % (delayed.db_record().uuid,)
+        return 'job uuid: %s' % (delayed.db_record().uuid,)
 
     TEST_GRAPH_MAX_PER_GROUP = 5
 
-    # flake8: noqa: C901
     def _create_graph_test_jobs(
-        self,
-        size,
-        priority=None,
-        max_retries=None,
-        channel=None,
-        description="Test job",
-        failure_rate=0,
+            self, size, priority=None, max_retries=None,
+            channel=None, description="Test job",
+            failure_rate=0
     ):
         model = http.request.env["queue.job"]
         current_count = 0
@@ -281,7 +271,8 @@ class RunJobController(http.Controller):
         root_delayable = None
         while current_count < size:
             jobs_count = min(
-                size - current_count, random.randint(1, self.TEST_GRAPH_MAX_PER_GROUP)
+                size - current_count,
+                random.randint(1, self.TEST_GRAPH_MAX_PER_GROUP)
             )
 
             jobs = []
@@ -307,6 +298,6 @@ class RunJobController(http.Controller):
 
         root_delayable.delay()
 
-        return "graph uuid: %s" % (
+        return 'graph uuid: %s' % (
             list(root_delayable._head())[0]._generated_job.graph_uuid,
         )

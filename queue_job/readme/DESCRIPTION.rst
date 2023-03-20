@@ -20,6 +20,7 @@ Example:
   class MyOtherModel(models.Model):
       _name = 'my.other.model'
 
+      @api.multi
       def button_do_stuff(self):
           self.env['my.model'].with_delay().my_method('a', k=2)
 

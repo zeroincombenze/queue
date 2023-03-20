@@ -2,69 +2,64 @@
 # License LGPL-3.0 or later (http://www.gnu.org/licenses/lgpl.html)
 
 from odoo import api, fields, models
-
 from odoo.addons.queue_job.delay import chain
-from odoo.addons.queue_job.exception import RetryableJobError
 from odoo.addons.queue_job.job import identity_exact
+from odoo.addons.queue_job.exception import RetryableJobError
 
 
 class QueueJob(models.Model):
 
-    _inherit = "queue.job"
+    _inherit = 'queue.job'
 
     additional_info = fields.Char()
 
+    @api.multi
     def testing_related_method(self, **kwargs):
         return self, kwargs
 
+    @api.multi
     def testing_related__none(self, **kwargs):
         return None
 
+    @api.multi
     def testing_related__url(self, **kwargs):
-        assert "url" in kwargs, "url required"
+        assert 'url' in kwargs, "url required"
         subject = self.args[0]
         return {
-            "type": "ir.actions.act_url",
-            "target": "new",
-            "url": kwargs["url"].format(subject=subject),
+            'type': 'ir.actions.act_url',
+            'target': 'new',
+            'url': kwargs['url'].format(subject=subject),
         }
 
 
-class ModelTestQueueJob(models.Model):
+class TestQueueJob(models.Model):
 
-    _name = "test.queue.job"
+    _name = 'test.queue.job'
     _description = "Test model for queue.job"
 
     name = fields.Char()
 
-    # to test the context is serialized/deserialized properly
-    @api.model
-    def _job_prepare_context_before_enqueue_keys(self):
-        return ("tz", "lang", "allowed_company_ids")
-
     def testing_method(self, *args, **kwargs):
-        """Method used for tests
+        """ Method used for tests
 
         Return always the arguments and keyword arguments received
         """
-        if kwargs.get("raise_retry"):
-            raise RetryableJobError("Must be retried later")
-        if kwargs.get("return_context"):
+        if kwargs.get('raise_retry'):
+            raise RetryableJobError('Must be retried later')
+        if kwargs.get('return_context'):
             return self.env.context
         return args, kwargs
 
     def create_ir_logging(self, message, level="info"):
-        return self.env["ir.logging"].create(
-            {
-                "name": "test_queue_job",
-                "type": "server",
-                "dbname": self.env.cr.dbname,
-                "message": message,
-                "path": "job",
-                "func": "create_ir_logging",
-                "line": 1,
-            }
-        )
+        return self.env["ir.logging"].create({
+            "name": "test_queue_job",
+            "type": "server",
+            "dbname": self.env.cr.dbname,
+            "message": message,
+            "path": "job",
+            "func": "create_ir_logging",
+            "line": 1,
+        })
 
     def no_description(self):
         return
@@ -76,11 +71,11 @@ class ModelTestQueueJob(models.Model):
         return
 
     def mapped(self, func):
-        return super(ModelTestQueueJob, self).mapped(func)
+        return super(TestQueueJob, self).mapped(func)
 
     def job_alter_mutable(self, mutable_arg, mutable_kwarg=None):
         mutable_arg.append(2)
-        mutable_kwarg["b"] = 2
+        mutable_kwarg['b'] = 2
         return mutable_arg, mutable_kwarg
 
     def delay_me(self, arg, kwarg=None):
@@ -136,15 +131,15 @@ class ModelTestQueueJob(models.Model):
                 max_retries=1,
                 priority=15,
             ).testing_method(1, foo=2),
-            self.delayable().testing_method("x", foo="y"),
+            self.delayable().testing_method('x', foo='y'),
             self.delayable().no_description(),
         )
         delayables.delay()
 
 
-class ModelTestQueueChannel(models.Model):
+class TestQueueChannel(models.Model):
 
-    _name = "test.queue.channel"
+    _name = 'test.queue.channel'
     _description = "Test model for queue.channel"
 
     def job_a(self):
@@ -156,10 +151,21 @@ class ModelTestQueueChannel(models.Model):
     def job_sub_channel(self):
         return
 
+    # TODO deprecated by :job-no-decorator:
+    @property
+    def dummy_property(self):
+        """ Return foo
 
-class ModelTestRelatedAction(models.Model):
+        Only there to check that properties are compatible
+        with the automatic registration of job methods
+        and their default channels.
+        """
+        return 'foo'
 
-    _name = "test.related.action"
+
+class TestRelatedAction(models.Model):
+
+    _name = 'test.related.action'
     _description = "Test model for related actions"
 
     def testing_related_action__no(self):

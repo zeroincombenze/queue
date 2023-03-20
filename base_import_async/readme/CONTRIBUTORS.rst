@@ -11,4 +11,3 @@ Other contributors include:
 * Jonathan Nemry (ACSONE)
 * Laurent Mignon (ACSONE)
 * Dennis Sluijk (Onestein)
-* Guewen Baconnier (Camptocamp)

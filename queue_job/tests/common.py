@@ -1,19 +1,18 @@
 # Copyright 2019 Camptocamp
 # License AGPL-3.0 or later (http://www.gnu.org/licenses/agpl).
 import doctest
-import logging
-import sys
-import typing
+
+from collections import namedtuple
 from contextlib import contextmanager
 from itertools import groupby
 from operator import attrgetter
-from unittest import TestCase, mock
+from unittest import mock, TestCase
 
-# pylint: disable=odoo-addons-relative-import
-from odoo.addons.queue_job.delay import Graph
+from odoo.tests import BaseCase, tagged
 
 # pylint: disable=odoo-addons-relative-import
 from odoo.addons.queue_job.job import Job
+from odoo.addons.queue_job.delay import Graph
 
 
 @contextmanager
@@ -101,24 +100,10 @@ def trap_jobs():
             yield trap
 
 
-class JobCall(typing.NamedTuple):
-    method: typing.Callable
-    args: tuple
-    kwargs: dict
-    properties: dict
-
-    def __eq__(self, other):
-        if not isinstance(other, JobCall):
-            return NotImplemented
-        return (
-            self.method.__func__ == other.method.__func__
-            and self.args == other.args
-            and self.kwargs == other.kwargs
-            and self.properties == other.properties
-        )
+JobCall = namedtuple("JobCall", "method args kwargs properties")
 
 
-class JobsTrap:
+class JobsTrap():
     """Used by ``trap_jobs()``, provide assert methods on the trapped jobs
 
     Look the documentation of ``trap_jobs()`` for a usage example.
@@ -136,7 +121,6 @@ class JobsTrap:
     You can also access the list of calls that were made to enqueue the jobs in
     the ``calls`` attribute, and the generated jobs in the ``enqueued_jobs``.
     """
-
     def __init__(self, job_mock):
         self.job_mock = job_mock
         self.job_mock.side_effect = self._add_job
@@ -162,7 +146,8 @@ class JobsTrap:
         """
         self._test_case.assertEqual(self.jobs_count(only=only), expected)
 
-    def assert_enqueued_job(self, method, args=None, kwargs=None, properties=None):
+    def assert_enqueued_job(self, method, args=None, kwargs=None,
+                            properties=None):
         """Raise an assertion error if the expected method has not been enqueued
 
         * ``method`` is the method (as method object) delayed as job
@@ -192,8 +177,7 @@ class JobsTrap:
         actual_calls = []
         for call in self.calls:
             checked_properties = {
-                key: value
-                for key, value in call.properties.items()
+                key: value for key, value in call.properties.items()
                 if key in properties
             }
             # build copy of calls with only the properties that we want to
@@ -203,29 +187,24 @@ class JobsTrap:
                     method=call.method,
                     args=call.args,
                     kwargs=call.kwargs,
-                    properties=checked_properties,
+                    properties=checked_properties
                 )
             )
 
         if expected_call not in actual_calls:
             raise AssertionError(
                 "Job %s was not enqueued.\n"
-                "Actual enqueued jobs:\n%s"
-                % (
+                "Actual enqueued jobs:\n%s" % (
                     self._format_job_call(expected_call),
-                    "\n".join(
-                        " * %s" % (self._format_job_call(call),)
-                        for call in actual_calls
-                    ),
+                    "\n".join(" * %s" % (self._format_job_call(call),)
+                              for call in actual_calls)
                 )
             )
 
     def perform_enqueued_jobs(self):
         """Perform the enqueued jobs synchronously"""
-
         def by_graph(job):
             return job.graph_uuid or ""
-
         sorted_jobs = sorted(self.enqueued_jobs, key=by_graph)
         for graph_uuid, jobs in groupby(sorted_jobs, key=by_graph):
             if graph_uuid:
@@ -253,20 +232,18 @@ class JobsTrap:
         job = Job(*args, **kwargs)
         self.enqueued_jobs.append(job)
 
-        patcher = mock.patch.object(job, "store")
+        patcher = mock.patch.object(job, 'store')
         self._store_patchers.append(patcher)
         patcher.start()
 
         job_args = kwargs.pop("args", None) or ()
         job_kwargs = kwargs.pop("kwargs", None) or {}
-        self.calls.append(
-            JobCall(
-                method=args[0],
-                args=job_args,
-                kwargs=job_kwargs,
-                properties=kwargs,
-            )
-        )
+        self.calls.append(JobCall(
+            method=args[0],
+            args=job_args,
+            kwargs=job_kwargs,
+            properties=kwargs,
+        ))
         return job
 
     def __enter__(self):
@@ -278,25 +255,27 @@ class JobsTrap:
 
     def _filtered_enqueued_jobs(self, job_method):
         enqueued_jobs = [
-            job
-            for job in self.enqueued_jobs
-            if job.func.__func__ == job_method.__func__
+            job for job in self.enqueued_jobs if job.func == job_method
         ]
         return enqueued_jobs
 
     def _format_job_call(self, call):
         method_all_args = []
         if call.args:
-            method_all_args.append(", ".join("%s" % (arg,) for arg in call.args))
+            method_all_args.append(
+                ", ".join("%s" % (arg,) for arg in call.args)
+            )
         if call.kwargs:
             method_all_args.append(
-                ", ".join("%s=%s" % (key, value) for key, value in call.kwargs.items())
+                ", ".join("%s=%s" % (key, value) for key, value
+                          in call.kwargs.items())
             )
         return "<%s>.%s(%s) with properties (%s)" % (
             call.method.__self__.__class__._name,
             call.method.__name__,
             ", ".join(method_all_args),
-            ", ".join("%s=%s" % (key, value) for key, value in call.properties.items()),
+            ", ".join("%s=%s" % (key, value) for key, value
+                      in call.properties.items()),
         )
 
     def __repr__(self):
@@ -304,8 +283,9 @@ class JobsTrap:
 
 
 class JobCounter:
+
     def __init__(self, env):
-        super().__init__()
+        super(JobCounter, self).__init__()
         self.env = env
         self.existing = self.search_all()
 
@@ -322,10 +302,11 @@ class JobCounter:
         return self.search_all() - self.existing
 
     def search_all(self):
-        return self.env["queue.job"].search([])
+        return self.env['queue.job'].search([])
 
 
 class JobMixin:
+
     def job_counter(self):
         return JobCounter(self.env)
 
@@ -385,42 +366,40 @@ def mock_with_delay():
                 self.assertDictEqual(delay_kwargs, {})
 
     An example of the first kind of test:
-    https://github.com/camptocamp/connector-jira/blob/0ca4261b3920d5e8c2ae4bb0fc352ea3f6e9d2cd/connector_jira/tests/test_batch_timestamp_import.py#L43-L76  # noqa
+    https://github.com/camptocamp/connector-jira/blob/0ca4261b3920d5e8c2ae4bb0fc352ea3f6e9d2cd/connector_jira/tests/test_batch_timestamp_import.py#L43-L76
     And the second kind:
-    https://github.com/camptocamp/connector-jira/blob/0ca4261b3920d5e8c2ae4bb0fc352ea3f6e9d2cd/connector_jira/tests/test_import_task.py#L34-L46  # noqa
+    https://github.com/camptocamp/connector-jira/blob/0ca4261b3920d5e8c2ae4bb0fc352ea3f6e9d2cd/connector_jira/tests/test_import_task.py#L34-L46
 
     """
     with mock.patch(
-        "odoo.addons.queue_job.models.base.DelayableRecordset",
-        name="DelayableRecordset",
+        'odoo.addons.queue_job.models.base.DelayableRecordset',
+        name='DelayableRecordset',
         spec=True,
     ) as delayable_cls:
         # prepare the mocks
-        delayable = mock.MagicMock(name="DelayableBinding")
+        delayable = mock.MagicMock(name='DelayableBinding')
         delayable_cls.return_value = delayable
         yield delayable_cls, delayable
 
 
-class OdooDocTestCase(doctest.DocTestCase):
+@tagged("doctest")
+class OdooDocTestCase(BaseCase):
     """
     We need a custom DocTestCase class in order to:
     - define test_tags to run as part of standard tests
     - output a more meaningful test name than default "DocTestCase.runTest"
     """
 
-    def __init__(self, doctest, optionflags=0, setUp=None, tearDown=None, checker=None):
-        super().__init__(
-            doctest._dt_test,
-            optionflags=optionflags,
-            setUp=setUp,
-            tearDown=tearDown,
-            checker=checker,
-        )
+    __qualname__ = "doctests for "
 
-    def setUp(self):
-        """Log an extra statement which test is started."""
-        super(OdooDocTestCase, self).setUp()
-        logging.getLogger(__name__).info("Running tests for %s", self._dt_test.name)
+    def __init__(self, test):
+        self.__test = test
+        self.__name = test._dt_test.name
+        super().__init__(self.__name)
+
+    def __getattr__(self, item):
+        if item == self.__name:
+            return self.__test
 
 
 def load_doctests(module):
@@ -430,20 +409,8 @@ def load_doctests(module):
     """
 
     def load_tests(loader, tests, ignore):
-        """
-        Apply the 'test_tags' attribute to each DocTestCase found by the DocTestSuite.
-        Also extend the DocTestCase class trivially to fit the class teardown
-        that Odoo backported for its own test classes from Python 3.8.
-        """
-        if sys.version_info < (3, 8):
-            doctest.DocTestCase.doClassCleanups = lambda: None
-            doctest.DocTestCase.tearDown_exceptions = []
-
         for test in doctest.DocTestSuite(module):
-            odoo_test = OdooDocTestCase(test)
-            odoo_test.test_tags = {"standard", "at_install", "queue_job", "doctest"}
-            tests.addTest(odoo_test)
-
+            tests.addTest(OdooDocTestCase(test))
         return tests
 
     return load_tests

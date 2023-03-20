@@ -2,12 +2,12 @@
 # License LGPL-3.0 or later (http://www.gnu.org/licenses/lgpl.html)
 
 import functools
+import inspect
 import logging
 
 from odoo import api, models
-
-from ..delay import Delayable
 from ..job import DelayableRecordset
+from ..delay import Delayable
 
 _logger = logging.getLogger(__name__)
 
@@ -18,18 +18,25 @@ class Base(models.AbstractModel):
     A new :meth:`~with_delay` method is added on all Odoo Models, allowing to
     postpone the execution of a job method in an asynchronous process.
     """
+    _inherit = 'base'
 
-    _inherit = "base"
+    # TODO deprecated by :job-no-decorator:
+    @api.model_cr
+    def _register_hook(self):
+        """Register marked jobs"""
+        super(Base, self)._register_hook()
+        job_methods = [
+            method for __, method
+            in inspect.getmembers(self.__class__, predicate=inspect.isfunction)
+            if getattr(method, 'delayable', None)
+        ]
+        for job_method in job_methods:
+            self.env['queue.job.function']._register_job(self, job_method)
 
-    def with_delay(
-        self,
-        priority=None,
-        eta=None,
-        max_retries=None,
-        description=None,
-        channel=None,
-        identity_key=None,
-    ):
+    @api.multi
+    def with_delay(self, priority=None, eta=None,
+                   max_retries=None, description=None,
+                   channel=None, identity_key=None):
         """Return a ``DelayableRecordset``
 
         It is a shortcut for the longer form as shown below::
@@ -54,25 +61,17 @@ class Base(models.AbstractModel):
         :return: instance of a DelayableRecordset
         :rtype: :class:`odoo.addons.queue_job.job.DelayableRecordset`
         """
-        return DelayableRecordset(
-            self,
-            priority=priority,
-            eta=eta,
-            max_retries=max_retries,
-            description=description,
-            channel=channel,
-            identity_key=identity_key,
-        )
+        return DelayableRecordset(self, priority=priority,
+                                  eta=eta,
+                                  max_retries=max_retries,
+                                  description=description,
+                                  channel=channel,
+                                  identity_key=identity_key)
 
-    def delayable(
-        self,
-        priority=None,
-        eta=None,
-        max_retries=None,
-        description=None,
-        channel=None,
-        identity_key=None,
-    ):
+    @api.multi
+    def delayable(self, priority=None, eta=None,
+                  max_retries=None, description=None,
+                  channel=None, identity_key=None):
         """Return a ``Delayable``
 
         The returned instance allows to enqueue any method of the recordset's
@@ -135,15 +134,12 @@ class Base(models.AbstractModel):
         :return: instance of a Delayable
         :rtype: :class:`odoo.addons.queue_job.job.Delayable`
         """
-        return Delayable(
-            self,
-            priority=priority,
-            eta=eta,
-            max_retries=max_retries,
-            description=description,
-            channel=channel,
-            identity_key=identity_key,
-        )
+        return Delayable(self, priority=priority,
+                         eta=eta,
+                         max_retries=max_retries,
+                         description=description,
+                         channel=channel,
+                         identity_key=identity_key)
 
     def _patch_job_auto_delay(self, method_name, context_key=None):
         """Patch a method to be automatically delayed as job method when called
@@ -251,22 +247,3 @@ class Base(models.AbstractModel):
         :return: dictionary for setting job values.
         """
         return {}
-
-    @api.model
-    def _job_prepare_context_before_enqueue_keys(self):
-        """Keys to keep in context of stored jobs
-        Empty by default for backward compatibility.
-        """
-        # TODO: when migrating to 16.0, active the base context keys:
-        # return ("tz", "lang", "allowed_company_ids", "force_company", "active_test")
-        return ()
-
-    def _job_prepare_context_before_enqueue(self):
-        """Return the context to store in the jobs
-        Can be used to keep only safe keys.
-        """
-        return {
-            key: value
-            for key, value in self.env.context.items()
-            if key in self._job_prepare_context_before_enqueue_keys()
-        }
