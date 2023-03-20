@@ -7,9 +7,9 @@ from datetime import datetime, timedelta
 import mock
 
 import odoo.tests.common as common
-from odoo import SUPERUSER_ID
 
 from odoo.addons.queue_job import identity_exact
+from odoo.addons.queue_job.delay import DelayableGraph
 from odoo.addons.queue_job.exception import (
     FailedJobError,
     NoSuchJobError,
@@ -22,6 +22,7 @@ from odoo.addons.queue_job.job import (
     PENDING,
     RETRY_INTERVAL,
     STARTED,
+    WAIT_DEPENDENCIES,
     Job,
 )
 
@@ -29,7 +30,7 @@ from .common import JobCommonCase
 
 
 class TestJobsOnTestingMethod(JobCommonCase):
-    """ Test Job """
+    """Test Job"""
 
     def test_new_job(self):
         """
@@ -39,14 +40,14 @@ class TestJobsOnTestingMethod(JobCommonCase):
         self.assertEqual(test_job.func.__func__, self.method.__func__)
 
     def test_eta(self):
-        """ When an `eta` is datetime, it uses it """
+        """When an `eta` is datetime, it uses it"""
         now = datetime.now()
         method = self.env["res.users"].mapped
         job_a = Job(method, eta=now)
         self.assertEqual(job_a.eta, now)
 
     def test_eta_integer(self):
-        """ When an `eta` is an integer, it adds n seconds up to now """
+        """When an `eta` is an integer, it adds n seconds up to now"""
         datetime_path = "odoo.addons.queue_job.job.datetime"
         with mock.patch(datetime_path, autospec=True) as mock_datetime:
             mock_datetime.now.return_value = datetime(2015, 3, 15, 16, 41, 0)
@@ -54,7 +55,7 @@ class TestJobsOnTestingMethod(JobCommonCase):
             self.assertEqual(job_a.eta, datetime(2015, 3, 15, 16, 42, 0))
 
     def test_eta_timedelta(self):
-        """ When an `eta` is a timedelta, it adds it up to now """
+        """When an `eta` is a timedelta, it adds it up to now"""
         datetime_path = "odoo.addons.queue_job.job.datetime"
         with mock.patch(datetime_path, autospec=True) as mock_datetime:
             mock_datetime.now.return_value = datetime(2015, 3, 15, 16, 41, 0)
@@ -150,6 +151,7 @@ class TestJobsOnTestingMethod(JobCommonCase):
 
     def test_set_done(self):
         job_a = Job(self.method)
+        job_a.date_started = datetime(2015, 3, 15, 16, 40, 0)
         datetime_path = "odoo.addons.queue_job.job.datetime"
         with mock.patch(datetime_path, autospec=True) as mock_datetime:
             mock_datetime.now.return_value = datetime(2015, 3, 15, 16, 41, 0)
@@ -158,13 +160,20 @@ class TestJobsOnTestingMethod(JobCommonCase):
         self.assertEqual(job_a.state, DONE)
         self.assertEqual(job_a.result, "test")
         self.assertEqual(job_a.date_done, datetime(2015, 3, 15, 16, 41, 0))
+        self.assertEqual(job_a.exec_time, 60.0)
         self.assertFalse(job_a.exc_info)
 
     def test_set_failed(self):
         job_a = Job(self.method)
-        job_a.set_failed(exc_info="failed test")
+        job_a.set_failed(
+            exc_info="failed test",
+            exc_name="FailedTest",
+            exc_message="Sadly this job failed",
+        )
         self.assertEqual(job_a.state, FAILED)
         self.assertEqual(job_a.exc_info, "failed test")
+        self.assertEqual(job_a.exc_name, "FailedTest")
+        self.assertEqual(job_a.exc_message, "Sadly this job failed")
 
     def test_postpone(self):
         job_a = Job(self.method)
@@ -177,11 +186,62 @@ class TestJobsOnTestingMethod(JobCommonCase):
         self.assertEqual(job_a.result, "test")
         self.assertFalse(job_a.exc_info)
 
+    def test_company_simple(self):
+        company = self.env.ref("base.main_company")
+        eta = datetime.now() + timedelta(hours=5)
+        test_job = Job(
+            self.env["test.queue.job"].with_company(company).testing_method,
+            args=("o", "k"),
+            kwargs={"return_context": 1},
+            priority=15,
+            eta=eta,
+            description="My description",
+        )
+        test_job.worker_pid = 99999  # normally set on "set_start"
+        test_job.store()
+        job_read = Job.load(self.env, test_job.uuid)
+        self.assertEqual(test_job.func.__func__, job_read.func.__func__)
+        result_ctx = job_read.func(*tuple(test_job.args), **test_job.kwargs)
+        self.assertEqual(result_ctx.get("allowed_company_ids"), company.ids)
+
+    def test_company_complex(self):
+        company1 = self.env.ref("base.main_company")
+        company2 = company1.create({"name": "Queue job company"})
+        companies = company1 | company2
+        self.env.user.write({"company_ids": [(6, False, companies.ids)]})
+        # Ensure the main company still the first
+        self.assertEqual(self.env.user.company_id, company1)
+        eta = datetime.now() + timedelta(hours=5)
+        test_job = Job(
+            self.env["test.queue.job"].with_company(company2).testing_method,
+            args=("o", "k"),
+            kwargs={"return_context": 1},
+            priority=15,
+            eta=eta,
+            description="My description",
+        )
+        test_job.worker_pid = 99999  # normally set on "set_start"
+        test_job.store()
+        job_read = Job.load(self.env, test_job.uuid)
+        self.assertEqual(test_job.func.__func__, job_read.func.__func__)
+        result_ctx = job_read.func(*tuple(test_job.args), **test_job.kwargs)
+        self.assertEqual(result_ctx.get("allowed_company_ids"), company2.ids)
+
     def test_store(self):
         test_job = Job(self.method)
         test_job.store()
         stored = self.queue_job.search([("uuid", "=", test_job.uuid)])
         self.assertEqual(len(stored), 1)
+
+    def test_store_extra_data(self):
+        test_job = Job(self.method)
+        test_job.store()
+        stored = self.queue_job.search([("uuid", "=", test_job.uuid)])
+        self.assertEqual(stored.additional_info, "JUST_TESTING")
+        test_job.set_failed(exc_info="failed test", exc_name="FailedTest")
+        test_job.store()
+        stored.invalidate_cache()
+        self.assertEqual(stored.additional_info, "JUST_TESTING_BUT_FAILED")
 
     def test_read(self):
         eta = datetime.now() + timedelta(hours=5)
@@ -234,6 +294,7 @@ class TestJobsOnTestingMethod(JobCommonCase):
         self.assertAlmostEqual(job_read.date_started, test_date, delta=delta)
         self.assertAlmostEqual(job_read.date_enqueued, test_date, delta=delta)
         self.assertAlmostEqual(job_read.date_done, test_date, delta=delta)
+        self.assertAlmostEqual(job_read.exec_time, 0.0)
 
     def test_job_unlinked(self):
         test_job = Job(self.method, args=("o", "k"), kwargs={"c": "!"})
@@ -246,19 +307,19 @@ class TestJobsOnTestingMethod(JobCommonCase):
     def test_unicode(self):
         test_job = Job(
             self.method,
-            args=(u"öô¿‽", u"ñě"),
-            kwargs={"c": u"ßø"},
+            args=("öô¿‽", "ñě"),
+            kwargs={"c": "ßø"},
             priority=15,
-            description=u"My dé^Wdescription",
+            description="My dé^Wdescription",
         )
         test_job.store()
         job_read = Job.load(self.env, test_job.uuid)
         self.assertEqual(test_job.args, job_read.args)
-        self.assertEqual(job_read.args, (u"öô¿‽", u"ñě"))
+        self.assertEqual(job_read.args, ("öô¿‽", "ñě"))
         self.assertEqual(test_job.kwargs, job_read.kwargs)
-        self.assertEqual(job_read.kwargs, {"c": u"ßø"})
+        self.assertEqual(job_read.kwargs, {"c": "ßø"})
         self.assertEqual(test_job.description, job_read.description)
-        self.assertEqual(job_read.description, u"My dé^Wdescription")
+        self.assertEqual(job_read.description, "My dé^Wdescription")
 
     def test_accented_bytestring(self):
         test_job = Job(
@@ -324,7 +385,7 @@ class TestJobsOnTestingMethod(JobCommonCase):
 
 
 class TestJobs(JobCommonCase):
-    """ Test jobs on other methods or with different job configuration """
+    """Test jobs on other methods or with different job configuration"""
 
     def test_description(self):
         """If no description is given to the job, it
@@ -343,7 +404,7 @@ class TestJobs(JobCommonCase):
         self.assertEqual(job_a.description, description)
 
     def test_retry_pattern(self):
-        """ When we specify a retry pattern, the eta must follow it"""
+        """When we specify a retry pattern, the eta must follow it"""
         datetime_path = "odoo.addons.queue_job.job.datetime"
         method = self.env["test.queue.job"].job_with_retry_pattern
         with mock.patch(datetime_path, autospec=True) as mock_datetime:
@@ -371,7 +432,7 @@ class TestJobs(JobCommonCase):
             self.assertEqual(test_job.eta, datetime(2015, 6, 1, 15, 15, 0))
 
     def test_retry_pattern_no_zero(self):
-        """ When we specify a retry pattern without 0, uses RETRY_INTERVAL"""
+        """When we specify a retry pattern without 0, uses RETRY_INTERVAL"""
         method = self.env["test.queue.job"].job_with_retry_pattern__no_zero
         test_job = Job(method, max_retries=0)
         test_job.retry += 1
@@ -400,7 +461,7 @@ class TestJobs(JobCommonCase):
         self.assertEqual(["test1", "test2"], job_instance.perform())
 
     def test_job_identity_key_no_duplicate(self):
-        """ If a job with same identity key in queue do not add a new one """
+        """If a job with same identity key in queue do not add a new one"""
         id_key = "e294e8444453b09d59bdb6efbfec1323"
         rec1 = self.env["test.queue.job"].create({"name": "test1"})
         job_1 = rec1.with_delay(identity_key=id_key).mapped("name")
@@ -410,7 +471,7 @@ class TestJobs(JobCommonCase):
         self.assertEqual(job_2.uuid, job_1.uuid)
 
     def test_job_with_mutable_arguments(self):
-        """ Job with mutable arguments do not mutate on perform() """
+        """Job with mutable arguments do not mutate on perform()"""
         delayable = self.env["test.queue.job"].with_delay()
         job_instance = delayable.job_alter_mutable([1], mutable_kwarg={"a": 1})
         self.assertTrue(job_instance)
@@ -476,12 +537,31 @@ class TestJobModel(JobCommonCase):
         stored.requeue()
         self.assertEqual(stored.state, PENDING)
 
+    def test_requeue_wait_dependencies_not_touched(self):
+        job_root = Job(self.env["test.queue.job"].testing_method)
+        job_child = Job(self.env["test.queue.job"].testing_method)
+        job_child.add_depends({job_root})
+        job_root.store()
+        job_child.store()
+
+        DelayableGraph._ensure_same_graph_uuid([job_root, job_child])
+
+        record_root = job_root.db_record()
+        record_child = job_child.db_record()
+        self.assertEqual(record_root.state, PENDING)
+        self.assertEqual(record_child.state, WAIT_DEPENDENCIES)
+        record_root.write({"state": "failed"})
+
+        (record_root + record_child).requeue()
+        self.assertEqual(record_root.state, PENDING)
+        self.assertEqual(record_child.state, WAIT_DEPENDENCIES)
+
     def test_message_when_write_fail(self):
         stored = self._create_job()
         stored.write({"state": "failed"})
         self.assertEqual(stored.state, FAILED)
         messages = stored.message_ids
-        self.assertEqual(len(messages), 2)
+        self.assertEqual(len(messages), 1)
 
     def test_follower_when_write_fail(self):
         """Check that inactive users doesn't are not followers even if
@@ -531,7 +611,7 @@ class TestJobModel(JobCommonCase):
 
 
 class TestJobStorageMultiCompany(common.TransactionCase):
-    """ Test storage of jobs """
+    """Test storage of jobs"""
 
     def setUp(self):
         super(TestJobStorageMultiCompany, self).setUp()
@@ -540,6 +620,22 @@ class TestJobStorageMultiCompany(common.TransactionCase):
         User = self.env["res.users"]
         Company = self.env["res.company"]
         Partner = self.env["res.partner"]
+
+        main_company = self.env.ref("base.main_company")
+
+        self.partner_user = Partner.create(
+            {"name": "Simple User", "email": "simple.user@example.com"}
+        )
+        self.simple_user = User.create(
+            {
+                "partner_id": self.partner_user.id,
+                "company_ids": [(4, main_company.id)],
+                "login": "simple_user",
+                "name": "simple user",
+                "groups_id": [],
+            }
+        )
+
         self.other_partner_a = Partner.create(
             {"name": "My Company a", "is_company": True, "email": "test@tes.ttest"}
         )
@@ -556,7 +652,7 @@ class TestJobStorageMultiCompany(common.TransactionCase):
                 "company_id": self.other_company_a.id,
                 "company_ids": [(4, self.other_company_a.id)],
                 "login": "my_login a",
-                "name": "my user",
+                "name": "my user A",
                 "groups_id": [(4, grp_queue_job_manager)],
             }
         )
@@ -576,15 +672,10 @@ class TestJobStorageMultiCompany(common.TransactionCase):
                 "company_id": self.other_company_b.id,
                 "company_ids": [(4, self.other_company_b.id)],
                 "login": "my_login_b",
-                "name": "my user 1",
+                "name": "my user B",
                 "groups_id": [(4, grp_queue_job_manager)],
             }
         )
-
-    def _subscribe_users(self, stored):
-        domain = stored._subscribe_users_domain()
-        users = self.env["res.users"].search(domain)
-        stored.message_subscribe(partner_ids=users.mapped("partner_id").ids)
 
     def _create_job(self, env):
         self.cr.execute("delete from queue_job")
@@ -631,11 +722,14 @@ class TestJobStorageMultiCompany(common.TransactionCase):
         # queue_job.group_queue_job_manager must be followers
         User = self.env["res.users"]
         no_company_context = dict(self.env.context, company_id=None)
-        no_company_env = self.env(context=no_company_context)
+        no_company_env = self.env(user=self.simple_user, context=no_company_context)
         stored = self._create_job(no_company_env)
-        self._subscribe_users(stored)
-        users = User.with_context(active_test=False).search(
-            [("groups_id", "=", self.ref("queue_job.group_queue_job_manager"))]
+        stored._message_post_on_failure()
+        users = (
+            User.search(
+                [("groups_id", "=", self.ref("queue_job.group_queue_job_manager"))]
+            )
+            + stored.user_id
         )
         self.assertEqual(len(stored.message_follower_ids), len(users))
         expected_partners = [u.partner_id for u in users]
@@ -649,13 +743,13 @@ class TestJobStorageMultiCompany(common.TransactionCase):
         # jobs created for a specific company_id are followed only by
         # company's members
         company_a_context = dict(self.env.context, company_id=self.other_company_a.id)
-        company_a_env = self.env(context=company_a_context)
+        company_a_env = self.env(user=self.simple_user, context=company_a_context)
         stored = self._create_job(company_a_env)
         stored.with_user(self.other_user_a.id)
-        self._subscribe_users(stored)
-        # 2 because admin + self.other_partner_a
+        stored._message_post_on_failure()
+        # 2 because simple_user (creator of job) + self.other_partner_a
         self.assertEqual(len(stored.message_follower_ids), 2)
-        users = User.browse([SUPERUSER_ID, self.other_user_a.id])
+        users = self.simple_user + self.other_user_a
         expected_partners = [u.partner_id for u in users]
         self.assertSetEqual(
             set(stored.message_follower_ids.mapped("partner_id")),
