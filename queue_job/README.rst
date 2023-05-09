@@ -14,13 +14,13 @@ Job Queue
     :target: http://www.gnu.org/licenses/lgpl-3.0-standalone.html
     :alt: License: LGPL-3
 .. |badge3| image:: https://img.shields.io/badge/github-OCA%2Fqueue-lightgray.png?logo=github
-    :target: https://github.com/OCA/queue/tree/14.0/queue_job
+    :target: https://github.com/OCA/queue/tree/16.0/queue_job
     :alt: OCA/queue
 .. |badge4| image:: https://img.shields.io/badge/weblate-Translate%20me-F47D42.png
-    :target: https://translation.odoo-community.org/projects/queue-14-0/queue-14-0-queue_job
+    :target: https://translation.odoo-community.org/projects/queue-16-0/queue-16-0-queue_job
     :alt: Translate me on Weblate
 .. |badge5| image:: https://img.shields.io/badge/runbot-Try%20me-875A7B.png
-    :target: https://runbot.odoo-community.org/runbot/230/14.0
+    :target: https://runbot.odoo-community.org/runbot/230/16.0
     :alt: Try me on Runbot
 
 |badge1| |badge2| |badge3| |badge4| |badge5| 
@@ -381,37 +381,20 @@ Based on this configuration, we can tell that:
 The context of the recordset of the job, or any recordset passed in arguments of
 a job, is transferred to the job according to an allow-list.
 
-The default allow-list is empty for backward compatibility. The allow-list can
+The default allow-list is `("tz", "lang", "allowed_company_ids", "force_company", "active_test")`. It can
 be customized in ``Base._job_prepare_context_before_enqueue_keys``.
-
-Example:
-
-.. code-block:: python
-
-   class Base(models.AbstractModel):
-
-       _inherit = "base"
-
-       @api.model
-       def _job_prepare_context_before_enqueue_keys(self):
-           """Keys to keep in context of stored jobs
-
-           Empty by default for backward compatibility.
-           """
-           return ("tz", "lang", "allowed_company_ids", "force_company", "active_test")
-
 **Bypass jobs on running Odoo**
 
 When you are developing (ie: connector modules) you might want
 to bypass the queue job and run your code immediately.
 
-To do so you can set `TEST_QUEUE_JOB_NO_DELAY=1` in your enviroment.
+To do so you can set `QUEUE_JOB__NO_DELAY=1` in your enviroment.
 
 **Bypass jobs in tests**
 
 When writing tests on job-related methods is always tricky to deal with
 delayed recordsets. To make your testing life easier
-you can set `test_queue_job_no_delay=True` in the context.
+you can set `queue_job__no_delay=True` in the context.
 
 Tip: you can do this at test case level like this
 
@@ -422,7 +405,7 @@ Tip: you can do this at test case level like this
         super().setUpClass()
         cls.env = cls.env(context=dict(
             cls.env.context,
-            test_queue_job_no_delay=True,  # no jobs thanks
+            queue_job__no_delay=True,  # no jobs thanks
         ))
 
 Then all your tests execute the job methods synchronously
@@ -451,12 +434,6 @@ tests), and it makes tests smaller.
 
 The best way to run such assertions on the enqueued jobs is to use
 ``odoo.addons.queue_job.tests.common.trap_jobs()``.
-
-Inside this context manager, instead of being added in the database's queue,
-jobs are pushed in an in-memory list. The context manager then provides useful
-helpers to verify that jobs have been enqueued with the expected arguments. It
-even can run the jobs of its list synchronously! Details in
-``odoo.addons.queue_job.tests.common.JobsTester``.
 
 A very small example (more details in ``tests/common.py``):
 
@@ -527,7 +504,7 @@ If you prefer, you can still test the whole thing in a single test, by calling
 When you are developing (ie: connector modules) you might want
 to bypass the queue job and run your code immediately.
 
-To do so you can set ``TEST_QUEUE_JOB_NO_DELAY=1`` in your environment.
+To do so you can set ``QUEUE_JOB__NO_DELAY=1`` in your environment.
 
 .. WARNING:: Do not do this in production
 
@@ -535,7 +512,7 @@ To do so you can set ``TEST_QUEUE_JOB_NO_DELAY=1`` in your environment.
 
 You should use ``trap_jobs``, really, but if for any reason you could not use it,
 and still need to have job methods executed synchronously in your tests, you can
-do so by setting ``test_queue_job_no_delay=True`` in the context.
+do so by setting ``queue_job__no_delay=True`` in the context.
 
 Tip: you can do this at test case level like this
 
@@ -546,7 +523,7 @@ Tip: you can do this at test case level like this
         super().setUpClass()
         cls.env = cls.env(context=dict(
             cls.env.context,
-            test_queue_job_no_delay=True,  # no jobs thanks
+            queue_job__no_delay=True,  # no jobs thanks
         ))
 
 Then all your tests execute the job methods synchronously without delaying any
@@ -556,7 +533,7 @@ In tests you'll have to mute the logger like:
 
     @mute_logger('odoo.addons.queue_job.models.base')
 
-.. NOTE:: in graphs of jobs, the ``test_queue_job_no_delay`` context key must be in at
+.. NOTE:: in graphs of jobs, the ``queue_job__no_delay`` context key must be in at
           least one job's env of the graph for the whole graph to be executed synchronously
 
 
@@ -623,7 +600,7 @@ Bug Tracker
 Bugs are tracked on `GitHub Issues <https://github.com/OCA/queue/issues>`_.
 In case of trouble, please check there if your issue has already been reported.
 If you spotted it first, help us smashing it by providing a detailed and welcomed
-`feedback <https://github.com/OCA/queue/issues/new?body=module:%20queue_job%0Aversion:%2014.0%0A%0A**Steps%20to%20reproduce**%0A-%20...%0A%0A**Current%20behavior**%0A%0A**Expected%20behavior**>`_.
+`feedback <https://github.com/OCA/queue/issues/new?body=module:%20queue_job%0Aversion:%2016.0%0A%0A**Steps%20to%20reproduce**%0A-%20...%0A%0A**Current%20behavior**%0A%0A**Expected%20behavior**>`_.
 
 Do not contact contributors directly about support or help with technical issues.
 
@@ -673,6 +650,6 @@ Current `maintainer <https://odoo-community.org/page/maintainer-role>`__:
 
 |maintainer-guewen| 
 
-This module is part of the `OCA/queue <https://github.com/OCA/queue/tree/14.0/queue_job>`_ project on GitHub.
+This module is part of the `OCA/queue <https://github.com/OCA/queue/tree/16.0/queue_job>`_ project on GitHub.
 
 You are welcome to contribute. To learn how please visit https://odoo-community.org/page/Contribute.

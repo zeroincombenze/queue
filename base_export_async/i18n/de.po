@@ -1,6 +1,6 @@
 # Translation of Odoo Server.
 # This file contains the translation of the following modules:
-# 	* base_export_async
+#	* base_export_async
 #
 msgid ""
 msgstr ""
@@ -17,10 +17,9 @@ msgstr ""
 "X-Generator: Weblate 3.7.1\n"
 
 #. module: base_export_async
-#: code:addons/base_export_async/models/delay_export.py:129
+#: code:addons/base_export_async/models/delay_export.py:112
 #, python-format
-msgid ""
-"\n"
+msgid "\n"
 "                <p>Your export is available <a href=\"{}\">here</a>.</p>\n"
 "                <p>It will be automatically deleted the {}.</p>\n"
 "                <p>&nbsp;</p>\n"
@@ -48,9 +47,8 @@ msgstr "(Der Export wird per Mail bereitgestellt.)"
 
 #. module: base_export_async
 #: model:ir.model,name:base_export_async.model_delay_export
-#, fuzzy
-msgid "Asynchronous Export"
-msgstr "Asynchroner Export"
+msgid "Allow to delay the export"
+msgstr "Verzögerung des Exports erlauben"
 
 #. module: base_export_async
 #. openerp-web
@@ -82,7 +80,7 @@ msgid "Display Name"
 msgstr "Anzeigename"
 
 #. module: base_export_async
-#: code:addons/base_export_async/models/delay_export.py:127
+#: code:addons/base_export_async/models/delay_export.py:110
 #, python-format
 msgid "Export {} {}"
 msgstr "Export {} {}"
@@ -122,12 +120,18 @@ msgid "Please select fields to export..."
 msgstr "Bitte Felder für den Export auswählen..."
 
 #. module: base_export_async
-#: model:ir.model.fields,field_description:base_export_async.field_delay_export__user_ids
-msgid "Users"
+#: code:addons/base_export_async/models/delay_export.py:42
+#, python-format
+msgid "The user doesn't have an email address."
+msgstr "Der Benutzer hat keine Email-Adresse."
+
+#. module: base_export_async
+#: model:ir.model.fields,field_description:base_export_async.field_delay_export__user_id
+msgid "User"
 msgstr "Benutzer"
 
 #. module: base_export_async
-#: code:addons/base_export_async/models/delay_export.py:30
+#: code:addons/base_export_async/models/delay_export.py:29
 #, python-format
 msgid "You must set an email address to your user."
 msgstr ""
@@ -135,14 +139,8 @@ msgstr ""
 
 #. module: base_export_async
 #. openerp-web
-#: code:addons/base_export_async/static/src/js/data_export.js:92
+#: code:addons/base_export_async/static/src/js/data_export.js:91
 #, python-format
 msgid "You will receive the export file by email as soon as it is finished."
 msgstr ""
 "Die Export-Datei wird per Email versendet, sobald der Export beendet ist."
-
-#~ msgid "Allow to delay the export"
-#~ msgstr "Verzögerung des Exports erlauben"
-
-#~ msgid "The user doesn't have an email address."
-#~ msgstr "Der Benutzer hat keine Email-Adresse."

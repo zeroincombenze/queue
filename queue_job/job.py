@@ -414,9 +414,6 @@ class Job(object):
         :param identity_key: A hash to uniquely identify a job, or a function
                              that returns this hash (the function takes the job
                              as argument)
-        :param graph_uuid: Shared UUID of the job's graph
-        :param env: Odoo Environment
-        :type env: :class:`odoo.api.Environment`
         """
         if args is None:
             args = ()
@@ -567,7 +564,7 @@ class Job(object):
             AND state = %s;
         """
         self.env.cr.execute(sql, (PENDING, self.uuid, DONE, WAIT_DEPENDENCIES))
-        self.env["queue.job"].invalidate_cache(["state"])
+        self.env["queue.job"].invalidate_model(["state"])
 
     def store(self):
         """Store the Job"""

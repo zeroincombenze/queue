@@ -7,7 +7,7 @@ from heapq import heappop, heappush
 from weakref import WeakValueDictionary
 
 from ..exception import ChannelNotFound
-from ..job import DONE, ENQUEUED, FAILED, PENDING, STARTED, WAIT_DEPENDENCIES
+from ..job import CANCELLED, DONE, ENQUEUED, FAILED, PENDING, STARTED, WAIT_DEPENDENCIES
 
 NOT_DONE = (WAIT_DEPENDENCIES, PENDING, ENQUEUED, STARTED, FAILED)
 
@@ -873,11 +873,11 @@ class ChannelManager(object):
                 capacity = config_items[1]
                 try:
                     config["capacity"] = int(capacity)
-                except Exception:
+                except Exception as ex:
                     raise ValueError(
                         "Invalid channel config %s: "
                         "invalid capacity %s" % (config_string, capacity)
-                    )
+                    ) from ex
                 for config_item in config_items[2:]:
                     kv = split_strip(config_item, "=")
                     if len(kv) == 1:
@@ -1046,7 +1046,7 @@ class ChannelManager(object):
             job = ChannelJob(db_name, channel, uuid, seq, date_created, priority, eta)
             self._jobs_by_uuid[uuid] = job
         # state transitions
-        if not state or state == DONE:
+        if not state or state in (DONE, CANCELLED):
             job.channel.set_done(job)
         elif state == PENDING:
             job.channel.set_pending(job)

@@ -2,17 +2,16 @@
 
 {
     "name": "Job Queue",
-    "version": "14.0.3.1.2",
+    "version": "16.0.2.3.1",
     "author": "Camptocamp,ACSONE SA/NV,Odoo Community Association (OCA)",
     "website": "https://github.com/OCA/queue",
     "license": "LGPL-3",
     "category": "Generic Modules",
-    "depends": ["mail", "base_sparse_field"],
+    "depends": ["mail", "base_sparse_field", "web"],
     "external_dependencies": {"python": ["requests"]},
     "data": [
         "security/security.xml",
         "security/ir.model.access.csv",
-        "views/queue_job_assets.xml",
         "views/queue_job_views.xml",
         "views/queue_job_channel_views.xml",
         "views/queue_job_function_views.xml",
@@ -23,6 +22,11 @@
         "data/queue_data.xml",
         "data/queue_job_function_data.xml",
     ],
+    "assets": {
+        "web.assets_backend": [
+            "/queue_job/static/src/views/**/*",
+        ],
+    },
     "installable": True,
     "development_status": "Mature",
     "maintainers": ["guewen"],

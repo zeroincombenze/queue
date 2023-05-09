@@ -1,2 +1,1 @@
-* Arnaud Pineux (ACSONE SA/NV) authored the initial prototype.
-* Guewen Baconnier (Camptocamp)
+Arnaud Pineux (ACSONE SA/NV) authored the initial prototype.
